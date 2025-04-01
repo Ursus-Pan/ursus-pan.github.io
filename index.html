@@ -12,7 +12,6 @@
             padding: 0;
             background-color: var(--tg-theme-bg-color, #ffffff);
             color: var(--tg-theme-text-color, #000000);
-            transition: background-color 0.3s, color 0.3s;
         }
         
         .container {
@@ -33,28 +32,18 @@
             background-color: var(--tg-theme-secondary-bg-color, #f4f4f4);
             margin-bottom: 16px;
             text-align: center;
+            min-height: 20px;
         }
         
-        .device-list {
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        
-        .device-card {
-            padding: 12px;
+        input {
+            width: 100%;
+            padding: 10px;
             border-radius: 8px;
-            background-color: var(--tg-theme-secondary-bg-color, #f4f4f4);
-        }
-        
-        .device-name {
-            font-weight: bold;
-            margin-bottom: 4px;
-        }
-        
-        .device-ip {
-            font-size: 14px;
-            color: var(--tg-theme-hint-color, #707579);
+            border: 1px solid var(--tg-theme-hint-color, #707579);
+            background-color: var(--tg-theme-bg-color, #ffffff);
+            color: var(--tg-theme-text-color, #000000);
+            box-sizing: border-box;
+            margin-bottom: 8px;
         }
         
         .btn {
@@ -70,7 +59,6 @@
             cursor: pointer;
             width: 100%;
             box-sizing: border-box;
-            margin-top: 8px;
         }
         
         .btn:disabled {
@@ -93,59 +81,18 @@
         @keyframes spin {
             to { transform: rotate(360deg); }
         }
-        
-        .manual-input {
-            margin-top: 16px;
-        }
-        
-        input {
-            width: 100%;
-            padding: 10px;
-            border-radius: 8px;
-            border: 1px solid var(--tg-theme-hint-color, #707579);
-            background-color: var(--tg-theme-bg-color, #ffffff);
-            color: var(--tg-theme-text-color, #000000);
-            box-sizing: border-box;
-            margin-bottom: 8px;
-        }
-        
-        .progress {
-            margin-top: 16px;
-            height: 4px;
-            background-color: var(--tg-theme-secondary-bg-color, #f4f4f4);
-            border-radius: 2px;
-            overflow: hidden;
-        }
-        
-        .progress-bar {
-            height: 100%;
-            background-color: var(--tg-theme-button-color, #2481cc);
-            width: 0%;
-            transition: width 0.3s;
-        }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>Поиск микшеров Behringer</h1>
+        <h1>Проверка подключения к микшеру</h1>
         
         <div class="status" id="status">
-            Нажмите "Начать поиск" для сканирования сети
+            Введите IP-адрес микшера и нажмите "Проверить"
         </div>
         
-        <button class="btn" id="scanBtn">Начать поиск</button>
-        
-        <div class="progress" id="progressContainer" style="display: none;">
-            <div class="progress-bar" id="progressBar"></div>
-        </div>
-        
-        <div class="device-list" id="deviceList"></div>
-        
-        <div class="manual-input">
-            <h3>Или введите IP вручную:</h3>
-            <input type="text" id="ipInput" placeholder="192.168.1.75">
-            <button class="btn" id="manualBtn">Проверить</button>
-        </div>
+        <input type="text" id="ipInput" placeholder="192.168.1.75">
+        <button class="btn" id="checkBtn">Проверить подключение</button>
     </div>
 
     <script>
@@ -153,34 +100,26 @@
         
         // Инициализируем приложение
         webApp.expand();
-        webApp.enableClosingConfirmation();
         webApp.ready();
         
         // Элементы интерфейса
-        const scanBtn = document.getElementById('scanBtn');
-        const manualBtn = document.getElementById('manualBtn');
+        const checkBtn = document.getElementById('checkBtn');
         const ipInput = document.getElementById('ipInput');
         const statusEl = document.getElementById('status');
-        const deviceList = document.getElementById('deviceList');
-        const progressContainer = document.getElementById('progressContainer');
-        const progressBar = document.getElementById('progressBar');
         
         // Порт OSC для Behringer X-Air
         const OSC_PORT = 10024;
-        // Таймаут для проверки одного IP (мс)
-        const CHECK_TIMEOUT = 2000;
-        // Задержка между проверками (мс)
-        const CHECK_DELAY = 100;
+        // Таймаут для проверки (мс)
+        const CHECK_TIMEOUT = 3000;
         
-        // Флаг для остановки сканирования
-        let isScanning = false;
-        
-        // Функция для проверки одного IP-адреса с таймаутом
-        async function checkIp(ip) {
+        // Функция для отправки OSC-запроса
+        async function checkMixerConnection(ip) {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
             
             try {
+                statusEl.textContent = "Отправляем запрос к микшеру...";
+                
                 // Пытаемся отправить запрос к OSC-интерфейсу
                 const response = await fetch(`http://${ip}:${OSC_PORT}/xinfo`, {
                     method: 'GET',
@@ -190,123 +129,23 @@
                 });
                 
                 // Если ответ получен (даже с ошибкой CORS), вероятно это наш микшер
-                return {
-                    ip: ip,
-                    status: 'found',
-                    error: null
-                };
+                statusEl.textContent = "Успешное подключение! Это Behringer X-Air";
+                return true;
             } catch (error) {
                 if (error.name === 'AbortError') {
-                    return {
-                        ip: ip,
-                        status: 'timeout',
-                        error: 'Таймаут проверки'
-                    };
-                } else if (error.message.includes('Failed to fetch')) {
-                    // Ошибка сети - возможно, устройство не отвечает
-                    return {
-                        ip: ip,
-                        status: 'not_found',
-                        error: 'Устройство не отвечает'
-                    };
+                    statusEl.textContent = "Таймаут подключения. Микшер не ответил";
+                } else {
+                    console.error("Ошибка подключения:", error);
+                    statusEl.textContent = "Ошибка подключения: " + error.message;
                 }
-                
-                return {
-                    ip: ip,
-                    status: 'error',
-                    error: error.message
-                };
+                return false;
             } finally {
                 clearTimeout(timeoutId);
             }
         }
         
-        // Функция для сканирования диапазона IP-адресов
-        async function scanNetwork() {
-            if (isScanning) return;
-            
-            isScanning = true;
-            scanBtn.disabled = true;
-            scanBtn.innerHTML = '<span class="loading"></span> Сканирование...';
-            deviceList.innerHTML = '';
-            progressContainer.style.display = 'block';
-            progressBar.style.width = '0%';
-            
-            // Базовый IP (первые три октета)
-            const baseIp = '192.168.1';
-            const startIp = 1;
-            const endIp = 254;
-            let foundDevices = 0;
-            
-            // Сканируем IP от startIp до endIp
-            for (let i = startIp; i <= endIp; i++) {
-                if (!isScanning) break;
-                
-                const ip = `${baseIp}.${i}`;
-                statusEl.textContent = `Проверяем ${ip}...`;
-                progressBar.style.width = `${((i - startIp) / (endIp - startIp)) * 100}%`;
-                
-                try {
-                    const result = await checkIp(ip);
-                    
-                    if (result.status === 'found') {
-                        foundDevices++;
-                        // Нашли устройство - добавляем в список
-                        addDeviceToList(ip, 'Behringer X-Air');
-                    }
-                    
-                    // Небольшая задержка между запросами
-                    await new Promise(resolve => setTimeout(resolve, CHECK_DELAY));
-                } catch (error) {
-                    console.error(`Ошибка при проверке ${ip}:`, error);
-                }
-            }
-            
-            progressBar.style.width = '100%';
-            statusEl.textContent = foundDevices > 0 
-                ? `Сканирование завершено. Найдено устройств: ${foundDevices}` 
-                : 'Сканирование завершено. Устройства не найдены';
-            
-            scanBtn.disabled = false;
-            scanBtn.textContent = 'Начать поиск';
-            isScanning = false;
-        }
-        
-        // Функция для добавления устройства в список
-        function addDeviceToList(ip, model) {
-            const deviceEl = document.createElement('div');
-            deviceEl.className = 'device-card';
-            deviceEl.innerHTML = `
-                <div class="device-name">${model}</div>
-                <div class="device-ip">IP: ${ip}</div>
-                <button class="btn use-btn" data-ip="${ip}">Использовать этот IP</button>
-            `;
-            deviceList.appendChild(deviceEl);
-            
-            // Добавляем обработчик для кнопки "Использовать"
-            deviceEl.querySelector('.use-btn').addEventListener('click', function() {
-                useDeviceIp(this.getAttribute('data-ip'));
-            });
-        }
-        
-        // Функция для использования выбранного IP
-        function useDeviceIp(ip) {
-            webApp.sendData(JSON.stringify({
-                action: 'use_ip',
-                ip: ip
-            }));
-            
-            // Показываем уведомление
-            webApp.showAlert(`IP-адрес ${ip} выбран. Приложение закроется.`);
-            
-            // Закрываем MiniApp
-            setTimeout(() => webApp.close(), 1000);
-        }
-        
-        // Обработчики событий
-        scanBtn.addEventListener('click', scanNetwork);
-        
-        manualBtn.addEventListener('click', async function() {
+        // Обработчик клика по кнопке проверки
+        checkBtn.addEventListener('click', async function() {
             const ip = ipInput.value.trim();
             
             if (!ip) {
@@ -314,37 +153,19 @@
                 return;
             }
             
-            // Проверяем введенный IP
-            statusEl.textContent = `Проверяем ${ip}...`;
-            manualBtn.disabled = true;
-            manualBtn.innerHTML = '<span class="loading"></span> Проверка...';
+            // Блокируем кнопку на время проверки
+            checkBtn.disabled = true;
+            checkBtn.innerHTML = '<span class="loading"></span> Проверка...';
             
-            try {
-                const result = await checkIp(ip);
-                
-                if (result.status === 'found') {
-                    useDeviceIp(ip);
-                } else {
-                    webApp.showAlert('Устройство не найдено. Проверьте IP-адрес и подключение.');
-                    statusEl.textContent = `Устройство по адресу ${ip} не найдено`;
-                }
-            } catch (error) {
-                webApp.showAlert('Ошибка: ' + error.message);
-                statusEl.textContent = 'Ошибка проверки';
-            } finally {
-                manualBtn.disabled = false;
-                manualBtn.textContent = 'Проверить';
-            }
+            // Выполняем проверку подключения
+            await checkMixerConnection(ip);
+            
+            // Разблокируем кнопку
+            checkBtn.disabled = false;
+            checkBtn.textContent = 'Проверить подключение';
         });
         
-        // Обработчик изменения темы
-        webApp.onEvent('themeChanged', function() {
-            // При изменении темы перезагружаем страницу для применения новых цветов
-            document.body.style.backgroundColor = webApp.themeParams.bg_color || '#ffffff';
-            document.body.style.color = webApp.themeParams.text_color || '#000000';
-        });
-        
-        // Применяем текущую тему при загрузке
+        // Применяем текущую тему
         document.body.style.backgroundColor = webApp.themeParams.bg_color || '#ffffff';
         document.body.style.color = webApp.themeParams.text_color || '#000000';
     </script>
