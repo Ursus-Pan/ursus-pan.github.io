@@ -107,41 +107,36 @@
         const ipInput = document.getElementById('ipInput');
         const statusEl = document.getElementById('status');
         
-        // Порт OSC для Behringer X-Air
-        const OSC_PORT = 10024;
+        // Порт WebSocket для Behringer X-Air
+        const WS_PORT = 10024;
         // Таймаут для проверки (мс)
         const CHECK_TIMEOUT = 3000;
         
-        // Функция для отправки OSC-запроса
+        // Функция для проверки подключения через WebSocket
         async function checkMixerConnection(ip) {
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
+            statusEl.textContent = "Пытаемся подключиться...";
             
-            try {
-                statusEl.textContent = "Отправляем запрос к микшеру...";
+            return new Promise((resolve) => {
+                const socket = new WebSocket(`ws://${ip}:${WS_PORT}`);
+                let timeout = setTimeout(() => {
+                    socket.close();
+                    statusEl.textContent = "Таймаут подключения";
+                    resolve(false);
+                }, CHECK_TIMEOUT);
                 
-                // Пытаемся отправить запрос к OSC-интерфейсу
-                const response = await fetch(`http://${ip}:${OSC_PORT}/xinfo`, {
-                    method: 'GET',
-                    signal: controller.signal,
-                    mode: 'no-cors',
-                    cache: 'no-store'
-                });
+                socket.onopen = function() {
+                    clearTimeout(timeout);
+                    statusEl.textContent = "Успешное подключение! Это Behringer X-Air";
+                    socket.close();
+                    resolve(true);
+                };
                 
-                // Если ответ получен (даже с ошибкой CORS), вероятно это наш микшер
-                statusEl.textContent = "Успешное подключение! Это Behringer X-Air";
-                return true;
-            } catch (error) {
-                if (error.name === 'AbortError') {
-                    statusEl.textContent = "Таймаут подключения. Микшер не ответил";
-                } else {
-                    console.error("Ошибка подключения:", error);
-                    statusEl.textContent = "Ошибка подключения: " + error.message;
-                }
-                return false;
-            } finally {
-                clearTimeout(timeoutId);
-            }
+                socket.onerror = function() {
+                    clearTimeout(timeout);
+                    statusEl.textContent = "Не удалось подключиться";
+                    resolve(false);
+                };
+            });
         }
         
         // Обработчик клика по кнопке проверки
