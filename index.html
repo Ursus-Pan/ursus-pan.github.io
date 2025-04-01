@@ -86,6 +86,8 @@
             border-radius: 50%;
             border-top-color: #fff;
             animation: spin 1s ease-in-out infinite;
+            vertical-align: middle;
+            margin-right: 8px;
         }
         
         @keyframes spin {
@@ -106,6 +108,21 @@
             box-sizing: border-box;
             margin-bottom: 8px;
         }
+        
+        .progress {
+            margin-top: 16px;
+            height: 4px;
+            background-color: var(--tg-theme-secondary-bg-color, #f4f4f4);
+            border-radius: 2px;
+            overflow: hidden;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background-color: var(--tg-theme-button-color, #2481cc);
+            width: 0%;
+            transition: width 0.3s;
+        }
     </style>
 </head>
 <body>
@@ -118,11 +135,15 @@
         
         <button class="btn" id="scanBtn">Начать поиск</button>
         
+        <div class="progress" id="progressContainer" style="display: none;">
+            <div class="progress-bar" id="progressBar"></div>
+        </div>
+        
         <div class="device-list" id="deviceList"></div>
         
         <div class="manual-input">
             <h3>Или введите IP вручную:</h3>
-            <input type="text" id="ipInput" placeholder="192.168.1.100">
+            <input type="text" id="ipInput" placeholder="192.168.1.75">
             <button class="btn" id="manualBtn">Проверить</button>
         </div>
     </div>
@@ -141,15 +162,29 @@
         const ipInput = document.getElementById('ipInput');
         const statusEl = document.getElementById('status');
         const deviceList = document.getElementById('deviceList');
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
         
         // Порт OSC для Behringer X-Air
         const OSC_PORT = 10024;
+        // Таймаут для проверки одного IP (мс)
+        const CHECK_TIMEOUT = 2000;
+        // Задержка между проверками (мс)
+        const CHECK_DELAY = 100;
         
-        // Функция для проверки одного IP-адреса
+        // Флаг для остановки сканирования
+        let isScanning = false;
+        
+        // Функция для проверки одного IP-адреса с таймаутом
         async function checkIp(ip) {
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), CHECK_TIMEOUT);
+            
             try {
-                const response = await fetch(`https://${ip}:${OSC_PORT}/xinfo`, {
+                // Пытаемся отправить запрос к OSC-интерфейсу
+                const response = await fetch(`http://${ip}:${OSC_PORT}/xinfo`, {
                     method: 'GET',
+                    signal: controller.signal,
                     mode: 'no-cors',
                     cache: 'no-store'
                 });
@@ -161,7 +196,13 @@
                     error: null
                 };
             } catch (error) {
-                if (error.message.includes('Failed to fetch')) {
+                if (error.name === 'AbortError') {
+                    return {
+                        ip: ip,
+                        status: 'timeout',
+                        error: 'Таймаут проверки'
+                    };
+                } else if (error.message.includes('Failed to fetch')) {
                     // Ошибка сети - возможно, устройство не отвечает
                     return {
                         ip: ip,
@@ -175,41 +216,60 @@
                     status: 'error',
                     error: error.message
                 };
+            } finally {
+                clearTimeout(timeoutId);
             }
         }
         
         // Функция для сканирования диапазона IP-адресов
         async function scanNetwork() {
+            if (isScanning) return;
+            
+            isScanning = true;
             scanBtn.disabled = true;
             scanBtn.innerHTML = '<span class="loading"></span> Сканирование...';
             deviceList.innerHTML = '';
+            progressContainer.style.display = 'block';
+            progressBar.style.width = '0%';
             
             // Базовый IP (первые три октета)
             const baseIp = '192.168.1';
+            const startIp = 1;
+            const endIp = 254;
+            let foundDevices = 0;
             
-            // Сканируем IP от 1 до 254
-            for (let i = 1; i <= 254; i++) {
+            // Сканируем IP от startIp до endIp
+            for (let i = startIp; i <= endIp; i++) {
+                if (!isScanning) break;
+                
                 const ip = `${baseIp}.${i}`;
                 statusEl.textContent = `Проверяем ${ip}...`;
+                progressBar.style.width = `${((i - startIp) / (endIp - startIp)) * 100}%`;
                 
                 try {
                     const result = await checkIp(ip);
                     
                     if (result.status === 'found') {
+                        foundDevices++;
                         // Нашли устройство - добавляем в список
                         addDeviceToList(ip, 'Behringer X-Air');
                     }
                     
                     // Небольшая задержка между запросами
-                    await new Promise(resolve => setTimeout(resolve, 50));
+                    await new Promise(resolve => setTimeout(resolve, CHECK_DELAY));
                 } catch (error) {
                     console.error(`Ошибка при проверке ${ip}:`, error);
                 }
             }
             
-            statusEl.textContent = 'Сканирование завершено';
+            progressBar.style.width = '100%';
+            statusEl.textContent = foundDevices > 0 
+                ? `Сканирование завершено. Найдено устройств: ${foundDevices}` 
+                : 'Сканирование завершено. Устройства не найдены';
+            
             scanBtn.disabled = false;
             scanBtn.textContent = 'Начать поиск';
+            isScanning = false;
         }
         
         // Функция для добавления устройства в список
@@ -246,7 +306,7 @@
         // Обработчики событий
         scanBtn.addEventListener('click', scanNetwork);
         
-        manualBtn.addEventListener('click', function() {
+        manualBtn.addEventListener('click', async function() {
             const ip = ipInput.value.trim();
             
             if (!ip) {
@@ -257,20 +317,24 @@
             // Проверяем введенный IP
             statusEl.textContent = `Проверяем ${ip}...`;
             manualBtn.disabled = true;
+            manualBtn.innerHTML = '<span class="loading"></span> Проверка...';
             
-            checkIp(ip).then(result => {
+            try {
+                const result = await checkIp(ip);
+                
                 if (result.status === 'found') {
                     useDeviceIp(ip);
                 } else {
                     webApp.showAlert('Устройство не найдено. Проверьте IP-адрес и подключение.');
-                    statusEl.textContent = 'Устройство не найдено';
+                    statusEl.textContent = `Устройство по адресу ${ip} не найдено`;
                 }
-            }).catch(error => {
+            } catch (error) {
                 webApp.showAlert('Ошибка: ' + error.message);
                 statusEl.textContent = 'Ошибка проверки';
-            }).finally(() => {
+            } finally {
                 manualBtn.disabled = false;
-            });
+                manualBtn.textContent = 'Проверить';
+            }
         });
         
         // Обработчик изменения темы
